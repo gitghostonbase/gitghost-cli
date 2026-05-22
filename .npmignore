@@ -1,0 +1,14 @@
+node_modules
+src
+*.tsbuildinfo
+tsconfig.json
+.gitignore
+.npmignore
+.env*
+*.log
+.DS_Store
+test/
+tests/
+__tests__/
+coverage/
+.github/
