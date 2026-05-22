@@ -130,8 +130,24 @@ export async function commitCommand(opts: {
 
   const fullMessage = `${canonicalMessage}${trailer}`;
 
+  // Strip identity from the git commit object itself. Otherwise the LSAG
+  // signature is anonymous on paper but every host (GitHub, GitLab, etc.)
+  // happily renders the local `git config user.name` next to the commit,
+  // defeating the whole point. Override BOTH the author and the committer
+  // to a neutral ghost identity. Timestamps are intentionally left alone
+  // so the commit graph stays useful; the author IDENTITY is what we hide.
+  const GHOST_NAME = "ghost";
+  const GHOST_EMAIL = "ghost@gitghost.org";
+  const ghostAuthor = `${GHOST_NAME} <${GHOST_EMAIL}>`;
+
   const stage = ora({ text: "writing commit...", color: "white" }).start();
   let commitSha: string;
+  // Set committer env vars for the spawned git process. Author is handled
+  // by the explicit --author flag below.
+  const prevCommitterName = process.env.GIT_COMMITTER_NAME;
+  const prevCommitterEmail = process.env.GIT_COMMITTER_EMAIL;
+  process.env.GIT_COMMITTER_NAME = GHOST_NAME;
+  process.env.GIT_COMMITTER_EMAIL = GHOST_EMAIL;
   try {
     const status = await repo.git.status();
     if (status.staged.length === 0 && status.created.length === 0 && status.modified.length === 0) {
@@ -139,6 +155,8 @@ export async function commitCommand(opts: {
       const result = await repo.git.raw([
         "commit",
         "--allow-empty",
+        "--author",
+        ghostAuthor,
         "-m",
         fullMessage,
       ]);
@@ -147,6 +165,8 @@ export async function commitCommand(opts: {
     } else {
       const result = await repo.git.raw([
         "commit",
+        "--author",
+        ghostAuthor,
         "-m",
         fullMessage,
       ]);
@@ -158,6 +178,19 @@ export async function commitCommand(opts: {
     stage.fail(`git commit failed: ${e.message ?? e}`);
     process.exitCode = 1;
     return;
+  } finally {
+    // Restore env so we don't leak ghost identity into unrelated git calls
+    // later in the same process (anchor, etc.).
+    if (prevCommitterName !== undefined) {
+      process.env.GIT_COMMITTER_NAME = prevCommitterName;
+    } else {
+      delete process.env.GIT_COMMITTER_NAME;
+    }
+    if (prevCommitterEmail !== undefined) {
+      process.env.GIT_COMMITTER_EMAIL = prevCommitterEmail;
+    } else {
+      delete process.env.GIT_COMMITTER_EMAIL;
+    }
   }
 
   // Persist anchor locally
